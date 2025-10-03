@@ -1,0 +1,78 @@
+# Configuracao - PDF RAG Chatbot
+
+# Configuracao do modelo de embeddings
+embeddings:
+  provider: "openai"  # "openai" ou "local"
+  model: "text-embedding-ada-002"
+  dimension: 1536
+  local_model: "all-MiniLM-L6-v2"  # Usado quando provider="local"
+
+# Configuracao do modelo de chat
+chat:
+  model: "gpt-3.5-turbo"
+  temperature: 0.1
+  max_tokens: 500
+  memory_window: 10
+
+# Configuracao de processamento de PDF
+pdf_processing:
+  chunk_size: 1000
+  chunk_overlap: 200
+  max_pages: 500
+  supported_formats: ["pdf"]
+
+# Configuracao de busca vetorial
+vector_search:
+  k_results: 5
+  score_threshold: 0.7
+  max_context_tokens: 2000
+  use_reranking: false
+
+# Configuracao da interface Streamlit
+interface:
+  page_title: "PDF RAG Chatbot"
+  page_icon: "📚"
+  layout: "wide"
+  sidebar_state: "expanded"
+  max_file_size: "200MB"
+  max_files: 10
+
+# Configuracao de logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/chatbot.log"
+
+# Configuracao de cache
+cache:
+  enable_embeddings_cache: true
+  cache_dir: "cache/"
+  max_cache_size: "1GB"
+
+# Configuracao de seguranca
+security:
+  api_key_required: true
+  max_query_length: 1000
+  rate_limit_requests: 100
+  rate_limit_window: 3600  # segundos
+
+# Configuracao de performance
+performance:
+  batch_size: 32
+  parallel_processing: true
+  max_workers: 4
+
+# Mensagens do sistema
+messages:
+  welcome: "Bem-vindo ao PDF RAG Chatbot! Carregue seus PDFs e comece a fazer perguntas."
+  no_documents: "Nenhum documento carregado. Por favor, carregue pelo menos um PDF."
+  processing: "Processando documentos... Isso pode levar alguns minutos."
+  error: "Ocorreu um erro. Tente novamente ou verifique os logs."
+
+# Exemplos de perguntas
+sample_questions:
+  - "Qual e o tema principal dos documentos?"
+  - "Resuma os pontos mais importantes"
+  - "Quais metodologias sao mencionadas?"
+  - "Existem conclusoes especificas apresentadas?"
+  - "Que referencias bibliograficas sao citadas?"
