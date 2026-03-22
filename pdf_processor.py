@@ -4,8 +4,9 @@ PDF Processor - Modulo para processamento de documentos PDF
 Extrai texto e cria chunks semanticos para indexacao vetorial
 """
 
-import os
 import logging
+import os
+import re
 from typing import List, Dict, Any
 import fitz  # PyMuPDF
 import pdfplumber
@@ -37,6 +38,38 @@ class PDFProcessor:
         )
         
         logger.info(f"PDFProcessor inicializado - chunk_size: {chunk_size}, overlap: {chunk_overlap}")
+
+    def extract_text(self, pdf_path: str) -> Dict[int, str]:
+        """
+        Executa extracao hibrida e escolhe o resultado mais rico por pagina.
+
+        Args:
+            pdf_path: Caminho para o arquivo PDF
+
+        Returns:
+            Dicionario com pagina e texto extraido
+        """
+        plumber_pages = self.extract_text_pdfplumber(pdf_path)
+        pymupdf_pages = self.extract_text_pymupdf(pdf_path)
+
+        merged_pages = {}
+        all_pages = sorted(set(plumber_pages) | set(pymupdf_pages))
+
+        for page_num in all_pages:
+            plumber_text = plumber_pages.get(page_num, "")
+            pymupdf_text = pymupdf_pages.get(page_num, "")
+
+            # Prefere a extracao com mais conteudo util
+            merged_pages[page_num] = plumber_text if len(plumber_text) >= len(pymupdf_text) else pymupdf_text
+
+        logger.info(
+            "Extracao hibrida concluida - paginas: %s | pdfplumber: %s | pymupdf: %s",
+            len(merged_pages),
+            len(plumber_pages),
+            len(pymupdf_pages)
+        )
+
+        return {page: text for page, text in merged_pages.items() if text and text.strip()}
     
     def extract_text_pymupdf(self, pdf_path: str) -> Dict[int, str]:
         """
@@ -138,21 +171,30 @@ class PDFProcessor:
         if not text:
             return ""
         
-        # Remover quebras de linha excessivas
-        text = text.replace('\n\n\n', '\n\n')
-        text = text.replace('\r\n', '\n')
-        
-        # Remover espacos excessivos
-        text = ' '.join(text.split())
-        
+        # Normalizar quebras de linha
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+        # Normalizar espacos preservando paragrafo
+        lines = [re.sub(r'\s+', ' ', line).strip() for line in text.split('\n')]
+        text = '\n'.join(lines)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
         # Remover caracteres especiais problematicos
         text = text.replace('\x00', '')
         text = text.replace('\ufeff', '')  # BOM
-        
-        # Normalizar aspas e apostrofes
-        text = text.replace('"', '"').replace('"', '"')
-        text = text.replace(''', "'").replace(''', "'")
-        
+
+        # Normalizar aspas e apostrofes tipograficos
+        replacements = {
+            '\u201c': '"',
+            '\u201d': '"',
+            '\u2018': "'",
+            '\u2019': "'",
+            '\u00a0': ' ',
+        }
+
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+
         return text.strip()
     
     def create_chunks(self, text: str, metadata: Dict[str, Any]) -> List[Document]:
@@ -213,13 +255,8 @@ class PDFProcessor:
         
         logger.info(f"Processando PDF: {filename}")
         
-        # Tentar pdfplumber primeiro (melhor para layout complexo)
-        text_by_page = self.extract_text_pdfplumber(pdf_path)
-        
-        # Se falhar, tentar PyMuPDF
-        if not text_by_page:
-            logger.info("pdfplumber falhou, tentando PyMuPDF...")
-            text_by_page = self.extract_text_pymupdf(pdf_path)
+        # Executar extracao hibrida
+        text_by_page = self.extract_text(pdf_path)
         
         if not text_by_page:
             logger.error(f"Nao foi possivel extrair texto de: {filename}")

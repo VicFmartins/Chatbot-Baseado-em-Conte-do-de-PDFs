@@ -2,14 +2,14 @@
 
 # Configuracao do modelo de embeddings
 embeddings:
-  provider: "openai"  # "openai" ou "local"
-  model: "text-embedding-ada-002"
+  provider: "local"  # "openai" ou "local"
+  model: "text-embedding-3-small"
   dimension: 1536
   local_model: "all-MiniLM-L6-v2"  # Usado quando provider="local"
 
 # Configuracao do modelo de chat
 chat:
-  model: "gpt-3.5-turbo"
+  model: "gpt-4o-mini"
   temperature: 0.1
   max_tokens: 500
   memory_window: 10
@@ -51,7 +51,7 @@ cache:
 
 # Configuracao de seguranca
 security:
-  api_key_required: true
+  api_key_required: false
   max_query_length: 1000
   rate_limit_requests: 100
   rate_limit_window: 3600  # segundos

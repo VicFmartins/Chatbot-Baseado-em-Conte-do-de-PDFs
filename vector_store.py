@@ -12,7 +12,6 @@ from typing import List, Dict, Any, Tuple
 import faiss
 from langchain.schema import Document
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
@@ -47,7 +46,7 @@ class VectorStore:
             logger.info(f"Usando OpenAI embeddings: {embedding_model}")
         else:
             # Usar modelo local (Sentence Transformers)
-            model_name = "all-MiniLM-L6-v2"  # Modelo leve e eficiente
+            model_name = embedding_model or "all-MiniLM-L6-v2"
             self.embedder = SentenceTransformer(model_name)
             self.dimension = self.embedder.get_sentence_embedding_dimension()
             logger.info(f"Usando modelo local: {model_name}")
@@ -136,8 +135,11 @@ class VectorStore:
         Returns:
             Lista de resultados com documentos e scores
         """
-        if not self.index or not self.documents:
+        if self.index is None or not self.documents:
             raise ValueError("Indice nao foi criado. Execute create_index() primeiro.")
+
+        if self.index.ntotal == 0:
+            return []
         
         # Gerar embedding da consulta
         query_embedding = self._get_single_embedding(query)
@@ -147,11 +149,14 @@ class VectorStore:
         faiss.normalize_L2(query_embedding)
         
         # Buscar no indice
-        scores, indices = self.index.search(query_embedding, k)
+        scores, indices = self.index.search(query_embedding, min(k, self.index.ntotal))
         
         # Processar resultados
         results = []
         for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
+            if idx < 0:
+                continue
+
             if score >= score_threshold:
                 doc = self.documents[idx]
                 
@@ -248,7 +253,7 @@ class VectorStore:
         Args:
             filepath: Caminho para salvar o indice
         """
-        if not self.index or not self.documents:
+        if self.index is None or not self.documents:
             raise ValueError("Nenhum indice para salvar")
         
         # Criar estrutura de dados para salvar
@@ -296,7 +301,7 @@ class VectorStore:
         Returns:
             Dicionario com estatisticas
         """
-        if not self.index or not self.documents:
+        if self.index is None or not self.documents:
             return {'status': 'empty'}
         
         # Contar documentos por fonte

@@ -6,13 +6,11 @@ Integra busca vetorial com modelos de linguagem para respostas contextuais
 
 import os
 import logging
-from typing import List, Dict, Any, Optional
-from langchain.llms import OpenAI
+from typing import List, Dict, Any
 from langchain.chat_models import ChatOpenAI
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.memory import ConversationBufferWindowMemory
-from langchain.chains import ConversationalRetrievalChain
 
 logger = logging.getLogger(__name__)
 
@@ -35,21 +33,23 @@ class ChatInterface:
             max_tokens: Limite de tokens por resposta
             memory_window: Janela de memoria de conversacao
         """
-        if not os.getenv("OPENAI_API_KEY"):
-            raise ValueError("OPENAI_API_KEY nao configurada")
-        
         self.vector_store = vector_store
         self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
-        
-        # Inicializar modelo de chat
-        self.llm = ChatOpenAI(
-            model_name=model_name,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            streaming=False
-        )
+        self.openai_enabled = bool(os.getenv("OPENAI_API_KEY"))
+
+        # Inicializar modelo de chat apenas quando a chave estiver configurada
+        self.llm = None
+        if self.openai_enabled:
+            self.llm = ChatOpenAI(
+                model_name=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                streaming=False
+            )
+        else:
+            logger.warning("OPENAI_API_KEY nao configurada. ChatInterface operara em modo extrativo.")
         
         # Configurar memoria de conversacao
         self.memory = ConversationBufferWindowMemory(
@@ -127,15 +127,39 @@ class ChatInterface:
         """
         formatted_context = self._format_context(context, sources)
         
-        prompt = f"""{self.system_prompt}
-
-{formatted_context}
+        prompt = f"""{formatted_context}
 
 PERGUNTA DO USUARIO: {query}
 
 RESPOSTA:"""
         
         return prompt
+
+    def _build_fallback_answer(self, query: str, sources: List[Dict[str, Any]]) -> str:
+        """
+        Gera resposta extrativa simples quando nao ha modelo generativo disponivel.
+        """
+        if not sources:
+            return (
+                "Nao encontrei trechos relevantes nos documentos carregados para responder a sua pergunta."
+            )
+
+        lines = [
+            "Modo sem OpenAI ativado. Abaixo estao os trechos mais relevantes encontrados nos PDFs:",
+            "",
+        ]
+
+        for idx, source in enumerate(sources[:3], 1):
+            lines.append(
+                f"{idx}. {source['filename']} (p. {source['page']}) - score {source['score']:.3f}"
+            )
+            lines.append(source["content"])
+            lines.append("")
+
+        lines.append(
+            "Se quiser respostas sintetizadas em linguagem natural, configure a OPENAI_API_KEY e refaça a pergunta."
+        )
+        return "\n".join(lines).strip()
     
     def get_response(self, query: str, use_memory: bool = True) -> Dict[str, Any]:
         """
@@ -167,9 +191,22 @@ RESPOSTA:"""
             
             # Criar prompt
             full_prompt = self._create_prompt(query, context, sources)
+
+            if self.llm is None:
+                answer = self._build_fallback_answer(query, sources)
+                if use_memory:
+                    self.memory.chat_memory.add_user_message(query)
+                    self.memory.chat_memory.add_ai_message(answer)
+
+                return {
+                    'answer': answer,
+                    'sources': sources,
+                    'context_used': True,
+                    'fallback_mode': True
+                }
             
             # Gerar resposta
-            messages = [HumanMessage(content=full_prompt)]
+            messages = [SystemMessage(content=self.system_prompt), HumanMessage(content=full_prompt)]
             
             # Adicionar memoria se solicitado
             if use_memory and hasattr(self.memory, 'chat_memory'):
@@ -220,6 +257,10 @@ RESPOSTA:"""
             Chunks da resposta conforme gerada
         """
         # Configurar streaming callback
+        if self.llm is None:
+            yield "Streaming indisponivel sem OPENAI_API_KEY configurada."
+            return
+
         streaming_llm = ChatOpenAI(
             model_name=self.model_name,
             temperature=self.temperature,
@@ -239,7 +280,7 @@ RESPOSTA:"""
         full_prompt = self._create_prompt(query, context, sources)
         
         # Gerar resposta com streaming
-        messages = [HumanMessage(content=full_prompt)]
+        messages = [SystemMessage(content=self.system_prompt), HumanMessage(content=full_prompt)]
         
         try:
             for chunk in streaming_llm.stream(messages):
@@ -279,6 +320,12 @@ RESPOSTA:"""
         if not combined_context:
             return "Nao foi possivel gerar resumo dos documentos."
         
+        if self.llm is None:
+            return (
+                "Modo sem OpenAI: nao e possivel gerar um resumo abstrativo. "
+                "Use os trechos recuperados para montar um resumo manual ou configure a OPENAI_API_KEY."
+            )
+
         # Prompt para resumo
         summary_prompt = f"""Com base no seguinte conteudo dos documentos, crie um resumo academico conciso:
 
@@ -293,7 +340,7 @@ Crie um resumo estruturado de ate {max_length} palavras cobrindo:
 RESUMO:"""
         
         try:
-            messages = [HumanMessage(content=summary_prompt)]
+            messages = [SystemMessage(content=self.system_prompt), HumanMessage(content=summary_prompt)]
             response = self.llm(messages)
             return response.content.strip()
         except Exception as e:
@@ -321,6 +368,14 @@ RESUMO:"""
                 "Existem recomendacoes para trabalhos futuros?"
             ]
         
+        if self.llm is None:
+            return [
+                "Quais sao os principais temas abordados nos PDFs?",
+                "Que autores, conceitos ou metodologias aparecem com mais frequencia?",
+                "Quais trechos tratam diretamente do problema de pesquisa?",
+                "Existem resultados ou conclusoes recorrentes entre os documentos?",
+            ]
+
         # Prompt para sugestoes
         suggestion_prompt = f"""Com base no seguinte conteudo dos documentos:
 
@@ -335,7 +390,7 @@ As perguntas devem ser:
 Liste apenas as perguntas, uma por linha, sem numeracao:"""
         
         try:
-            messages = [HumanMessage(content=suggestion_prompt)]
+            messages = [SystemMessage(content=self.system_prompt), HumanMessage(content=suggestion_prompt)]
             response = self.llm(messages)
             
             # Processar resposta
