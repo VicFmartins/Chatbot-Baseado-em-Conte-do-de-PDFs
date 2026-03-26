@@ -109,7 +109,7 @@ Responsável por:
 ### 1. Clone o repositório
 
 ```bash
-git clone https://github.com/VicFmartins/Chatbot-Baseado-em-Conte-do-de-PDFs.git
+git clone <url-do-repositorio>
 cd Chatbot-Baseado-em-Conte-do-de-PDFs
 ```
 
